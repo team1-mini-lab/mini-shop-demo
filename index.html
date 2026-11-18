@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>미니 쇼핑몰: Mini Redis × Mini DBMS</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #fff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e4e2dc;
+    --slow: #d9534f; --mid: #e0a030; --fast: #2e8b57; --accent: #2f5bd3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 -apple-system, "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 24px 64px; }
+  header h1 { margin: 0; font-size: 28px; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  #status { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--line); }
+  .pill.on { background: #dff1e6; color: #1d6b40; } .pill.off { background: #f8dcdb; color: #9b2c28; }
+
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+            padding: 24px; margin-top: 24px; }
+  .act { font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+  h2 { margin: 2px 0 4px; font-size: 22px; }
+  .desc { margin: 0 0 16px; color: var(--muted); }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; width: 160px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--ink);
+           background: var(--ink); color: #fff; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--ink); }
+  button:disabled { opacity: .4; cursor: wait; }
+  code { font: 13px/1.4 ui-monospace, Menlo, monospace; background: #f1efe9; padding: 2px 6px; border-radius: 4px; }
+
+  .bars { margin-top: 20px; display: grid; gap: 14px; }
+  .bar-row { display: grid; grid-template-columns: 190px 1fr 150px; gap: 12px; align-items: center; }
+  .bar-label { font-weight: 600; }
+  .bar-label small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+  .track { height: 28px; background: #f1efe9; border-radius: 6px; overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 6px; transition: width .6s ease; min-width: 3px; }
+  .value { font-size: 22px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .value small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .note { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 1.5em; }
+  .note b { color: var(--ink); }
+  .error { color: var(--slow); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>미니 쇼핑몰 · 상품 100만 개</h1>
+    <p>Mini DBMS (B+ 트리 · 스레드풀) + Mini Redis (해시 테이블 · TTL)</p>
+    <div id="status"></div>
+  </header>
+
+  <!-- 1막 -->
+  <section>
+    <div class="act">1막 · 인덱스</div>
+    <h2>상품 번호로 상세 페이지 조회</h2>
+    <p class="desc">같은 <code>WHERE id = ?</code>를 인덱스 없이(풀스캔) 찾을 때와 B+ 트리로 찾을 때</p>
+    <div class="controls">
+      상품 번호 <input id="a1-id" value="999999">
+      <button id="a1-run">조회</button>
+    </div>
+    <div class="bars" id="a1-bars"></div>
+    <div class="note" id="a1-note"></div>
+  </section>
+
+  <!-- 2막 -->
+  <section>
+    <div class="act">2막 · 캐시</div>
+    <h2>인기 상품 검색이 몰릴 때</h2>
+    <p class="desc">인덱스 없는 <code>WHERE name = ?</code> 결과를 Redis에 캐싱 (Cache-Aside, TTL 60초)</p>
+    <div class="controls">
+      검색어 <input id="a2-name" value="에어팟 프로">
+      <button id="a2-run">검색</button>
+      <button id="a2-reset" class="ghost">캐시 비우기</button>
+    </div>
+    <div class="bars" id="a2-bars"></div>
+    <div class="note" id="a2-note"></div>
+  </section>
+
+  <!-- 3막 -->
+  <section>
+    <div class="act">3막 · 스레드풀</div>
+    <h2>무거운 검색이 도는 중에도 상세 페이지는 바로</h2>
+    <p class="desc">캐시에 없는 검색(풀스캔) <span id="a3-heavy-label">4</span>개가 먼저 들어온 직후, 상품 상세(<code>id</code> 조회) 요청 하나</p>
+    <div class="controls">
+      무거운 검색 수 <input id="a3-heavy" value="4" style="width:70px">
+      <button id="a3-single">스레드 1개</button>
+      <button id="a3-multi">스레드 8개</button>
+    </div>
+    <div class="bars" id="a3-bars"></div>
+    <div class="note" id="a3-note"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (ms) => ms == null ? "-" : ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : ms >= 1 ? ms.toFixed(1) + " ms" : ms.toFixed(3) + " ms";
+const num = (n) => n == null ? "-" : n.toLocaleString();
+
+async function call(url, options) {
+  const response = await fetch(url, options);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+// 막대: rows = [{label, sub, ms, color}] (같은 막 안에서는 가장 큰 값 기준으로 길이를 맞춘다)
+function drawBars(container, rows) {
+  const max = Math.max(...rows.map((r) => r.ms || 0), 1);
+  container.innerHTML = rows.map((r) => `
+    <div class="bar-row">
+      <div class="bar-label">${r.label}<small>${r.sub || ""}</small></div>
+      <div class="track"><div class="fill" style="background:${r.color}" data-w="${(r.ms / max) * 100}"></div></div>
+      <div class="value">${fmt(r.ms)}</div>
+    </div>`).join("");
+  requestAnimationFrame(() => container.querySelectorAll(".fill").forEach((el) => el.style.width = el.dataset.w + "%"));
+}
+
+function busy(buttons, on) { buttons.forEach((b) => b.disabled = on); }
+function fail(note, error) { note.innerHTML = `<span class="error">${error.message}</span>`; }
+
+// ---- 상태
+async function refreshStatus() {
+  try {
+    const s = await call("/api/status");
+    const pill = (ok, name) => `<span class="pill ${ok ? "on" : "off"}">${name} ${ok ? "켜짐" : "꺼짐"}</span>`;
+    $("status").innerHTML = pill(s.mini_redis, "Mini Redis :8000") + pill(s.dbms_multi, "DBMS 8스레드 :9000") + pill(s.dbms_single, "DBMS 1스레드 :9001");
+  } catch (e) { $("status").innerHTML = `<span class="pill off">쇼핑몰 서버 응답 없음</span>`; }
+}
+
+// ---- 1막
+$("a1-run").onclick = async () => {
+  busy([$("a1-run")], true);
+  $("a1-note").textContent = "조회 중...";
+  try {
+    const r = await call(`/api/act1?id=${encodeURIComponent($("a1-id").value)}`);
+    drawBars($("a1-bars"), [
+      { label: "인덱스 없음", sub: `풀스캔 · ${num(r.full_scan.rows_scanned)}행 확인`, ms: r.full_scan.engine_ms, color: "var(--slow)" },
+      { label: "B+ 트리 인덱스", sub: `${num(r.index.rows_scanned)}행 확인`, ms: r.index.engine_ms, color: "var(--fast)" },
+    ]);
+    const times = r.index.engine_ms ? Math.round(r.full_scan.engine_ms / r.index.engine_ms) : "-";
+    $("a1-note").innerHTML = `결과 ${r.index.row_count}건 · 두 방법 결과 ${r.same_result ? "동일" : "<b>다름!</b>"} · <b>약 ${num(times)}배</b> 차이 (DBMS 엔진 내부 시간 기준)`;
+  } catch (e) { fail($("a1-note"), e); }
+  busy([$("a1-run")], false);
+};
+
+// ---- 2막
+const act2History = [];
+$("a2-run").onclick = async () => {
+  busy([$("a2-run"), $("a2-reset")], true);
+  try {
+    const r = await call(`/api/act2?name=${encodeURIComponent($("a2-name").value)}`);
+    act2History.push(r);
+    const rows = act2History.slice(-4).map((h, i, list) => ({
+      label: `${act2History.length - list.length + i + 1}회차 · ${h.source === "cache" ? "HIT" : "MISS"}`,
+      sub: h.source === "cache" ? "Redis에서 바로 응답" : `DBMS 풀스캔 ${num(h.rows_scanned)}행 → Redis 저장`,
+      ms: h.total_ms,
+      color: h.source === "cache" ? "var(--fast)" : "var(--slow)",
+    }));
+    drawBars($("a2-bars"), rows);
+    $("a2-note").innerHTML = r.source === "cache"
+      ? `<b>캐시 HIT</b> · DB에 가지 않음 · Redis ${fmt(r.redis_ms)} · 결과 ${r.rows.length}건`
+      : `<b>캐시 MISS</b> · DBMS ${fmt(r.db_ms)} + Redis ${fmt(r.redis_ms)} · 결과 ${r.rows.length}건을 ${r.ttl}초 동안 캐싱`;
+  } catch (e) { fail($("a2-note"), e); }
+  busy([$("a2-run"), $("a2-reset")], false);
+};
+$("a2-reset").onclick = async () => {
+  try {
+    const r = await call(`/api/act2/reset?name=${encodeURIComponent($("a2-name").value)}`, { method: "POST" });
+    act2History.length = 0;
+    $("a2-bars").innerHTML = "";
+    $("a2-note").innerHTML = r.deleted ? "캐시를 지웠습니다. 다음 검색은 다시 DB로 갑니다." : "지울 캐시가 없습니다.";
+  } catch (e) { fail($("a2-note"), e); }
+};
+
+// ---- 3막
+const act3Results = {};
+async function runAct3(mode) {
+  const buttons = [$("a3-single"), $("a3-multi")];
+  busy(buttons, true);
+  $("a3-note").textContent = "무거운 검색을 보내는 중...";
+  try {
+    const heavy = $("a3-heavy").value;
+    $("a3-heavy-label").textContent = heavy;
+    const r = await call(`/api/act3?mode=${mode}&heavy=${heavy}`);
+    act3Results[mode] = r;
+    const rows = ["single", "multi"].filter((m) => act3Results[m]).map((m) => ({
+      label: m === "single" ? "스레드 1개" : "스레드 8개",
+      sub: `실제 처리 ${fmt(act3Results[m].light.engine_ms)}`,
+      ms: act3Results[m].light.total_ms,
+      color: m === "single" ? "var(--slow)" : "var(--fast)",
+    }));
+    drawBars($("a3-bars"), rows);
+    $("a3-note").innerHTML = `상품 상세 조회 응답 시간 · 처리는 <b>${fmt(r.light.engine_ms)}</b>, 기다린 시간은 <b>${fmt(r.light_waiting_ms)}</b>`;
+  } catch (e) { fail($("a3-note"), e); }
+  busy(buttons, false);
+}
+$("a3-single").onclick = () => runAct3("single");
+$("a3-multi").onclick = () => runAct3("multi");
+
+refreshStatus();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>
