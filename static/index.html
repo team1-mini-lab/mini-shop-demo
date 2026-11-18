@@ -29,6 +29,14 @@
            background: var(--ink); color: #fff; cursor: pointer; }
   button.ghost { background: transparent; color: var(--ink); }
   button:disabled { opacity: .4; cursor: wait; }
+  button.scan { background: var(--slow); border-color: var(--slow); }
+  button.index { background: var(--fast); border-color: var(--fast); }
+  /* 1막: 응답을 기다리는 동안 움직이는 막대 */
+  .fill.pending { background: repeating-linear-gradient(45deg, #e8a19e 0 8px, #f3c9c7 8px 16px) !important;
+                  background-size: 22.6px 22.6px !important; animation: slide 0.6s linear infinite; transition: none; }
+  .fill.pending.index-pending { background: repeating-linear-gradient(45deg, #8cc7a5 0 8px, #bfe0cc 8px 16px) !important; }
+  @keyframes slide { from { background-position: 0 0; } to { background-position: 22.6px 0; } }
+  .value.pending { color: var(--muted); }
   code { font: 13px/1.4 ui-monospace, Menlo, monospace; background: #f1efe9; padding: 2px 6px; border-radius: 4px; }
 
   .bars { margin-top: 20px; display: grid; gap: 14px; }
@@ -41,10 +49,43 @@
   .value small { font-size: 13px; font-weight: 400; color: var(--muted); }
   .note { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 1.5em; }
   .note b { color: var(--ink); }
+  /* 숫자 칩: 라벨은 작게, 숫자는 크게. 문장 대신 이걸로 결과를 보여 준다 */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 12px; border-radius: 999px;
+          background: #f1efe9; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .chip b { font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .chip.big { padding: 6px 16px; font-size: 14px; } .chip.big b { font-size: 22px; }
+  .chip.good b { color: var(--fast); } .chip.bad b { color: var(--slow); }
+  .chip.hit { background: #dff1e6; color: #1d6b40; font-weight: 700; }
+  .chip.miss { background: #f8dcdb; color: #9b2c28; font-weight: 700; }
+  .chip.faint { background: transparent; padding-left: 2px; font-size: 12px; }
+  .chip.faint b { font-size: 12px; color: var(--muted); }
   .error { color: var(--slow); }
   .sub + .sub { margin-top: 22px; padding-top: 20px; border-top: 1px dashed var(--line); }
   .sub-head { font-weight: 700; margin-bottom: 10px; }
   .sub-desc { margin: -4px 0 12px; font-size: 14px; color: var(--muted); }
+
+  /* 2막 오른쪽 캐시 카운트다운 패널 */
+  .act2-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .act2-layout { grid-template-columns: 1fr; } }
+  .act2-main .bar-row { grid-template-columns: 170px 1fr 110px; }
+  .cache-panel { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: #faf9f6;
+                 position: sticky; top: 16px; }
+  .cache-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 15px; }
+  .cache-head .chip { padding: 2px 10px; font-size: 12px; }
+  .cache-empty { margin-top: 14px; font-size: 13px; color: var(--muted); text-align: center; padding: 18px 0; }
+  .cache-item { margin-top: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent;
+                transition: border-color .3s, background .3s, opacity .4s; }
+  .cache-item.flash-hit { border-color: var(--fast); background: #e6f4ec; }
+  .cache-item.flash-new { border-color: var(--accent); background: #e9eefb; }
+  .cache-item.expired { opacity: .55; }
+  .cache-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .cache-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cache-left { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+  .cache-tag { font-size: 11px; font-weight: 700; margin-left: 4px; }
+  .cache-key { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+  .cache-track { height: 6px; background: #ebe8e1; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .cache-fill { height: 100%; border-radius: 3px; }
 
   /* 1막 결과 표 */
   .result { margin-top: 12px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
@@ -54,6 +95,10 @@
   .result td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .result tr:last-child td { border-bottom: 0; }
   .result-more { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .result-source { display: flex; justify-content: flex-end; margin-top: 12px; margin-bottom: -6px; }
+  .result-source span { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+  .result-source .from-db { background: #f8dcdb; color: #9b2c28; }
+  .result-source .from-redis { background: #dff1e6; color: #1d6b40; }
 
   /* 3막 타임라인 */
   .legend { display: flex; gap: 18px; margin-top: 16px; font-size: 13px; color: var(--muted); }
@@ -64,10 +109,10 @@
   .tl { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
   .tl-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
   .tl-head h3 { margin: 0; font-size: 17px; }
-  .tl-result { font-size: 15px; }
+  .tl-result { font-size: 15px; color: var(--muted); }
   .tl-result b { font-size: 24px; }
   .tl-result.slow b { color: var(--slow); } .tl-result.fast b { color: var(--fast); }
-  .lane { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: center; margin: 6px 0; }
+  .lane { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: center; margin: 6px 0; }
   .lane-label { font-size: 14px; }
   .lane-label small { display: block; color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
   .lane.me .lane-label { font-weight: 700; }
@@ -78,7 +123,7 @@
   .sw.pending, .seg.pending { background: repeating-linear-gradient(45deg, #b4b1a9 0 5px, #cdcac2 5px 10px); }
   .seg.pending { -webkit-mask-image: linear-gradient(90deg, #000 80%, transparent); mask-image: linear-gradient(90deg, #000 80%, transparent); }
   .seg-label { position: absolute; top: 50%; transform: translateY(-50%); font-size: 12px; white-space: nowrap; color: var(--ink); padding-left: 6px; }
-  .axis { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
+  .axis { display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
   .axis-line { position: relative; height: 18px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
   .axis-line span { position: absolute; top: 2px; transform: translateX(-50%); }
 </style>
@@ -95,13 +140,13 @@
   <section>
     <div class="act">1막 · 인덱스</div>
     <h2>상품 번호로 찾기</h2>
-    <p class="desc">같은 조건을 인덱스 없이(풀스캔) 찾을 때와 B+ 트리로 찾을 때</p>
 
     <div class="sub">
       <div class="sub-head">상세 페이지 · 한 개 <code>WHERE id = ?</code></div>
       <div class="controls">
         상품 번호 <input id="a1-id" value="999999">
-        <button id="a1-run">조회</button>
+        <button id="a1-scan" class="scan">인덱스 없이 조회 (풀스캔)</button>
+        <button id="a1-index" class="index">인덱스로 조회 (B+ 트리)</button>
       </div>
       <div class="bars" id="a1-bars"></div>
       <div class="note" id="a1-note"></div>
@@ -110,11 +155,10 @@
 
     <div class="sub">
       <div class="sub-head">상품 목록 · 범위 <code>WHERE id &lt;= ?</code></div>
-      <p class="sub-desc">B+ 트리는 시작 위치의 리프를 한 번 찾은 뒤, 연결된 옆 리프를 따라가며 범위 안의 행만 읽습니다.
-        (해시 인덱스는 범위 검색을 할 수 없습니다)</p>
       <div class="controls">
         상품 번호 1 ~ <input id="a1r-to" value="10" style="width:100px">
-        <button id="a1r-run">범위 조회</button>
+        <button id="a1r-scan" class="scan">인덱스 없이 범위 조회 (풀스캔)</button>
+        <button id="a1r-index" class="index">인덱스로 범위 조회 (B+ 트리)</button>
       </div>
       <div class="bars" id="a1r-bars"></div>
       <div class="note" id="a1r-note"></div>
@@ -126,36 +170,40 @@
   <section>
     <div class="act">2막 · 캐시</div>
     <h2>인기 상품 검색이 몰릴 때</h2>
-    <p class="desc">인덱스 없는 <code>WHERE name = ?</code> 결과를 Redis에 캐싱 (Cache-Aside, TTL 60초)</p>
-    <div class="controls">
-      검색어 <input id="a2-name" value="에어팟 프로">
-      <button id="a2-run">검색</button>
-      <button id="a2-reset" class="ghost">캐시 비우기</button>
+    <p class="desc"><code>WHERE name = ?</code> 검색 결과를 Redis에 캐싱</p>
+    <div class="act2-layout">
+      <div class="act2-main">
+        <div class="controls">
+          검색어 <input id="a2-name" value="에어팟 프로">
+          <button id="a2-run">검색</button>
+          <button id="a2-reset" class="ghost">캐시 비우기</button>
+        </div>
+        <div class="bars" id="a2-bars"></div>
+        <div class="note" id="a2-note"></div>
+        <div id="a2-table"></div>
+      </div>
+      <aside class="cache-panel">
+        <div class="cache-head">Redis 캐시 <span class="chip">TTL <b id="a2-ttl">60</b>s</span></div>
+        <div id="a2-cache"></div>
+      </aside>
     </div>
-    <div class="bars" id="a2-bars"></div>
-    <div class="note" id="a2-note"></div>
   </section>
 
   <!-- 3막 -->
   <section>
     <div class="act">3막 · 스레드풀</div>
     <h2>남의 무거운 검색 때문에 내 상세 페이지가 늦게 뜨는 경우</h2>
-    <p class="desc">
-      다른 고객 <span id="a3-heavy-label">2</span>명이 <b>DB에 없는 상품명</b>을 검색하는 중에
-      (이름에는 인덱스가 없어서, 결과가 0건이어도 100만 행을 끝까지 다 확인합니다)
-      내가 상품 상세 페이지(<code>id = <span id="a3-id-label">123</span></code>, B+ 트리)를 엽니다.<br>
-      <b>측정 대상: 내 상품 상세 페이지가 뜨기까지 걸린 시간</b>
-    </p>
+    <p class="desc">다른 고객 <span id="a3-heavy-label">5</span>명이 존재하지 않는 상품명을 검색하는 중에, 내가 상품 상세 페이지를 엽니다</p>
     <div class="controls">
-      다른 고객 수 <input id="a3-heavy" value="2" style="width:70px">
+      다른 고객 수 <input id="a3-heavy" value="5" style="width:70px">
       <button id="a3-single">DB 스레드 1개</button>
       <button id="a3-multi">DB 스레드 8개</button>
     </div>
     <div class="legend">
-      <span><i class="sw pending"></i>응답 대기 중 (실시간)</span>
+      <span><i class="sw pending"></i>응답 대기</span>
       <span><i class="sw wait"></i>줄 서서 기다림</span>
-      <span><i class="sw heavy"></i>풀스캔 처리 중</span>
-      <span><i class="sw light"></i>상세 조회 처리</span>
+      <span><i class="sw heavy"></i>풀스캔 (100만 행 · 결과 0건)</span>
+      <span><i class="sw light"></i>상세 조회</span>
     </div>
     <div id="a3-timelines"></div>
     <div class="note" id="a3-note"></div>
@@ -202,9 +250,12 @@ async function refreshStatus() {
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const COLUMN_LABELS = { id: "상품 번호", name: "이름", category: "카테고리", price: "가격" };
 
-function drawResultTable(container, columns, rows, total) {
+// source: "db" | "redis" | undefined. 주면 표 오른쪽 위에 출처 배지를 단다 (2막)
+function drawResultTable(container, columns, rows, total, source) {
+  const badge = source === "redis" ? `<div class="result-source"><span class="from-redis">출처: Redis</span></div>`
+              : source === "db"    ? `<div class="result-source"><span class="from-db">출처: DB</span></div>` : "";
   if (!rows.length) {
-    container.innerHTML = `<div class="result-more">해당하는 상품이 없습니다.</div>`;
+    container.innerHTML = badge + `<div class="result-more">결과 없음</div>`;
     return;
   }
   const cell = (col, v) => col === "price" ? `<td class="num">${num(v)}원</td>`
@@ -212,52 +263,130 @@ function drawResultTable(container, columns, rows, total) {
                          : `<td>${escapeHtml(v)}</td>`;
   const head = columns.map((c) => `<th>${COLUMN_LABELS[c] || escapeHtml(c)}</th>`).join("");
   const body = rows.map((row) => `<tr>${row.map((v, i) => cell(columns[i], v)).join("")}</tr>`).join("");
-  container.innerHTML = `<div class="result"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
-    + (total > rows.length ? `<div class="result-more">앞 ${num(rows.length)}건만 표시 · 외 ${num(total - rows.length)}건</div>` : "");
+  container.innerHTML = badge + `<div class="result"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    + (total > rows.length ? `<div class="result-more">+${num(total - rows.length)}건 더</div>` : "");
 }
 
-// ---- 1막 (한 개 / 범위가 같은 모양으로 그려진다. prefix: a1 또는 a1r)
-async function runAct1(prefix, url, indexLabel) {
-  const button = $(`${prefix}-run`), note = $(`${prefix}-note`);
-  busy([button], true);
-  note.textContent = "조회 중...";
-  $(`${prefix}-table`).innerHTML = "";
-  try {
-    const r = await call(url);
-    // 한 개 조회는 index.rows에 전체 결과가, 범위 조회는 preview_rows에 앞부분만 온다
-    drawResultTable($(`${prefix}-table`), r.index.columns || [], r.preview_rows || r.index.rows || [], r.index.row_count);
-    drawBars($(`${prefix}-bars`), [
-      { label: "인덱스 없음", sub: `풀스캔 · ${num(r.full_scan.rows_scanned)}행 확인`, ms: r.full_scan.engine_ms, color: "var(--slow)" },
-      { label: indexLabel, sub: `${num(r.index.rows_scanned)}행 확인`, ms: r.index.engine_ms, color: "var(--fast)" },
-    ]);
-    const times = r.index.engine_ms ? Math.round(r.full_scan.engine_ms / r.index.engine_ms) : "-";
-    note.innerHTML = `결과 ${num(r.index.row_count)}건 · 두 방법 결과 ${r.same_result ? "동일" : "<b>다름!</b>"} · <b>약 ${num(times)}배</b> 차이 (DBMS 엔진 내부 시간 기준)`
-      + `<br>네트워크 왕복을 포함한 체감 시간: 풀스캔 <b>${fmt(r.full_scan.total_ms)}</b> vs B+ 트리 <b>${fmt(r.index.total_ms)}</b>`;
-  } catch (e) { fail(note, e); }
-  busy([button], false);
+// ---- 1막: 버튼마다 한 가지 방법만 실행해서, 누른 순간부터 결과가 뜰 때까지의 체감 속도를 보여 준다.
+// 같은 조건으로 두 버튼을 다 누르면 막대 두 개가 나란히 남아 비교된다. 조건(입력값)을 바꾸면 비교를 새로 시작한다.
+const ACT1 = {
+  a1: {
+    input: "a1-id",
+    url: (value, method) => `/api/act1?id=${encodeURIComponent(value)}&method=${method}`,
+    labels: { scan: "인덱스 없음", index: "B+ 트리 인덱스" },
+  },
+  a1r: {
+    input: "a1r-to",
+    url: (value, method) => `/api/act1/range?to=${encodeURIComponent(value)}&method=${method}`,
+    labels: { scan: "인덱스 없음", index: "B+ 트리 · 리프 따라가기" },
+  },
+};
+// prefix -> { value: 비교 중인 입력값, scan: 결과, index: 결과 }. 결과는 {pending, started} 또는 응답 + browser_ms
+const act1State = { a1: {}, a1r: {} };
+
+function drawAct1(prefix, animate = false) {
+  const state = act1State[prefix], labels = ACT1[prefix].labels;
+  const now = performance.now();
+  const entries = ["scan", "index"].filter((m) => state[m]).map((m) => {
+    const s = state[m];
+    return { method: m, s, ms: s.pending ? now - s.started : s.browser_ms };
+  });
+  const max = Math.max(...entries.map((e) => e.ms), 1);
+  const container = $(`${prefix}-bars`);
+  container.innerHTML = entries.map(({ method, s, ms }) => {
+    const color = method === "scan" ? "var(--slow)" : "var(--fast)";
+    const sub = s.pending ? "조회 중…" : `${num(s.rows_scanned)}행 읽음`;
+    const width = (ms / max) * 100;
+    const fill = s.pending
+      ? `<div class="fill pending ${method === "index" ? "index-pending" : ""}" style="width:${width}%"></div>`
+      : `<div class="fill" style="background:${color};width:${animate ? 0 : width}%" data-w="${width}"></div>`;
+    return `<div class="bar-row">
+      <div class="bar-label">${labels[method]}<small>${sub}</small></div>
+      <div class="track">${fill}</div>
+      <div class="value ${s.pending ? "pending" : ""}">${fmt(ms)}${s.pending ? "…" : ""}</div>
+    </div>`;
+  }).join("");
+  if (animate) {
+    requestAnimationFrame(() => container.querySelectorAll(".fill[data-w]").forEach((el) => el.style.width = el.dataset.w + "%"));
+  }
 }
-$("a1-run").onclick = () =>
-  runAct1("a1", `/api/act1?id=${encodeURIComponent($("a1-id").value)}`, "B+ 트리 인덱스");
-$("a1r-run").onclick = () =>
-  runAct1("a1r", `/api/act1/range?to=${encodeURIComponent($("a1r-to").value)}`, "B+ 트리 · 리프 따라가기");
+
+// 두 방법을 다 실행했을 때만 비교 칩을 보여 준다. 하나만 했을 때는 막대와 표로 충분하다.
+function act1Note(prefix) {
+  const { scan, index } = act1State[prefix];
+  if (!scan || !index || scan.pending || index.pending) return "";
+  const same = scan.rows_digest === index.rows_digest;
+  const feel = Math.round(scan.browser_ms / index.browser_ms);
+  const engine = index.engine_ms ? Math.round(scan.engine_ms / index.engine_ms) : null;
+  return `<div class="chips">
+    <span class="chip big good"><b>약 ${num(feel)}배</b> 빠름</span>
+    ${engine ? `<span class="chip faint">엔진 기준 <b>${num(engine)}배</b></span>` : ""}
+    <span class="chip ${same ? "" : "bad"}">결과 <b>${same ? "동일" : "다름!"}</b></span>
+  </div>`;
+}
+
+async function runAct1(prefix, method) {
+  const cfg = ACT1[prefix], state = act1State[prefix], note = $(`${prefix}-note`);
+  const buttons = [$(`${prefix}-scan`), $(`${prefix}-index`)];
+  const value = $(cfg.input).value;
+  if (state.value !== value) {   // 조건이 바뀌면 이전 비교는 의미가 없으니 비운다
+    act1State[prefix] = { value };
+    return runAct1(prefix, method);
+  }
+  busy(buttons, true);
+  $(`${prefix}-table`).innerHTML = "";   // 결과가 뜨기 전까지 비워 둬서 기다림이 보이게 한다
+  note.innerHTML = "";
+  const started = performance.now();
+  state[method] = { pending: true, started };
+  const timer = setInterval(() => drawAct1(prefix), 50);   // 기다리는 동안 시간이 올라간다
+  drawAct1(prefix);
+  try {
+    const r = await call(cfg.url(value, method));
+    state[method] = { ...r.result, rows_digest: r.rows_digest, browser_ms: performance.now() - started };
+    clearInterval(timer);
+    drawAct1(prefix, true);
+    // 한 개 조회는 result.rows에 전체 결과가, 범위 조회는 preview_rows에 앞부분만 온다
+    drawResultTable($(`${prefix}-table`), r.result.columns || [], r.preview_rows || r.result.rows || [], r.result.row_count);
+    note.innerHTML = act1Note(prefix);
+  } catch (e) {
+    clearInterval(timer);
+    delete state[method];
+    drawAct1(prefix);
+    fail(note, e);
+  }
+  busy(buttons, false);
+}
+for (const prefix of ["a1", "a1r"]) {
+  $(`${prefix}-scan`).onclick = () => runAct1(prefix, "scan");
+  $(`${prefix}-index`).onclick = () => runAct1(prefix, "index");
+}
 
 // ---- 2막
 const act2History = [];
 $("a2-run").onclick = async () => {
   busy([$("a2-run"), $("a2-reset")], true);
+  $("a2-table").innerHTML = "";   // 결과가 뜨기 전까지 비워 둬서 MISS일 때의 기다림이 보이게 한다
+  $("a2-note").textContent = "검색 중…";
   try {
-    const r = await call(`/api/act2?name=${encodeURIComponent($("a2-name").value)}`);
-    act2History.push(r);
+    const name = $("a2-name").value;
+    const r = await call(`/api/act2?name=${encodeURIComponent(name)}`);
+    act2History.push({ ...r, name });
+    flashCache(name, r.source === "cache" ? "hit" : "new");
+    refreshCache();
+    drawResultTable($("a2-table"), r.columns || [], r.rows || [], r.row_count, r.source === "cache" ? "redis" : "db");
     const rows = act2History.slice(-4).map((h, i, list) => ({
       label: `${act2History.length - list.length + i + 1}회차 · ${h.source === "cache" ? "HIT" : "MISS"}`,
-      sub: h.source === "cache" ? "Redis에서 바로 응답" : `DBMS 풀스캔 ${num(h.rows_scanned)}행 → Redis 저장`,
+      sub: escapeHtml(h.name),
       ms: h.total_ms,
       color: h.source === "cache" ? "var(--fast)" : "var(--slow)",
     }));
     drawBars($("a2-bars"), rows);
-    $("a2-note").innerHTML = r.source === "cache"
-      ? `<b>캐시 HIT</b> · DB에 가지 않음 · Redis ${fmt(r.redis_ms)} · 결과 ${r.rows.length}건`
-      : `<b>캐시 MISS</b> · DBMS ${fmt(r.db_ms)} + Redis ${fmt(r.redis_ms)} · 결과 ${r.rows.length}건을 ${r.ttl}초 동안 캐싱`;
+    $("a2-note").innerHTML = `<div class="chips">` + (r.source === "cache"
+      ? `<span class="chip hit">HIT</span><span class="chip">Redis <b>${fmt(r.redis_ms)}</b></span>`
+      : `<span class="chip miss">MISS</span><span class="chip">DB <b>${fmt(r.db_ms)}</b></span>`
+        + (r.cache_saved === false ? "" : `<span class="chip">→ Redis 저장</span>`))
+      + `</div>`
+      + (r.cache_error ? `<div class="error">${escapeHtml(r.cache_error)}</div>` : "");
   } catch (e) { fail($("a2-note"), e); }
   busy([$("a2-run"), $("a2-reset")], false);
 };
@@ -266,44 +395,98 @@ $("a2-reset").onclick = async () => {
     const r = await call(`/api/act2/reset?name=${encodeURIComponent($("a2-name").value)}`, { method: "POST" });
     act2History.length = 0;
     $("a2-bars").innerHTML = "";
-    $("a2-note").innerHTML = r.deleted ? "캐시를 지웠습니다. 다음 검색은 다시 DB로 갑니다." : "지울 캐시가 없습니다.";
+    $("a2-table").innerHTML = "";
+    $("a2-note").innerHTML = r.deleted ? "캐시를 비웠습니다" : "비울 캐시가 없습니다";
+    refreshCache();
   } catch (e) { fail($("a2-note"), e); }
 };
+
+// ---- 2막 오른쪽: 캐시 카운트다운 패널
+// 2초마다 서버에서 목록(검색어 + 남은 초)을 받고, 그 사이에는 0.1초마다 브라우저에서 줄여 그린다.
+// 0초가 되면 3초 동안 '만료'로 보여 준 뒤 목록에서 뺀다.
+const EXPIRED_SHOW_MS = 3000;
+let cacheTtl = 60;
+let cacheEntries = [];            // [{ name, key, expiresAt (performance.now 기준 ms) }]
+const cacheFlash = {};            // name -> { kind: "hit" | "new", at }
+
+function flashCache(name, kind) { cacheFlash[name] = { kind, at: performance.now() }; }
+
+async function refreshCache() {
+  try {
+    const c = await call("/api/act2/cache");
+    cacheTtl = c.ttl;
+    $("a2-ttl").textContent = c.ttl;
+    const now = performance.now();
+    const next = c.entries.map((e) => ({ name: e.name, key: e.key, expiresAt: now + e.remaining_s * 1000 }));
+    // 방금 시간이 다 돼서 서버 목록에서 빠진 것은 잠깐 '만료'로 남겨 둔다 (지운 것은 바로 사라진다)
+    for (const old of cacheEntries) {
+      const justExpired = old.expiresAt <= now && now - old.expiresAt < EXPIRED_SHOW_MS;
+      if (justExpired && !next.some((e) => e.name === old.name)) next.push(old);
+    }
+    cacheEntries = next;
+  } catch (e) { /* Redis나 쇼핑몰 서버가 잠깐 응답하지 않으면 패널은 그대로 둔다 */ }
+  drawCache();
+}
+
+function drawCache() {
+  const now = performance.now();
+  cacheEntries = cacheEntries.filter((e) => now - e.expiresAt < EXPIRED_SHOW_MS);
+  if (!cacheEntries.length) {
+    $("a2-cache").innerHTML = `<div class="cache-empty">비어 있음</div>`;
+    return;
+  }
+  $("a2-cache").innerHTML = cacheEntries.map((e) => {
+    const left = Math.max(0, (e.expiresAt - now) / 1000);
+    const expired = left <= 0;
+    const color = left > 20 ? "var(--fast)" : left > 10 ? "var(--mid)" : "var(--slow)";
+    const flash = cacheFlash[e.name] && now - cacheFlash[e.name].at < 1500 ? cacheFlash[e.name].kind : null;
+    const tag = flash === "hit" ? `<span class="cache-tag" style="color:var(--fast)">HIT!</span>`
+              : flash === "new" ? `<span class="cache-tag" style="color:var(--accent)">저장</span>` : "";
+    return `<div class="cache-item ${expired ? "expired" : ""} ${flash && !expired ? `flash-${flash}` : ""}">
+      <div class="cache-row">
+        <span class="cache-name">${escapeHtml(e.name)}${tag}</span>
+        <span class="cache-left" style="color:${expired ? "var(--muted)" : color}">${expired ? "만료" : `${Math.ceil(left)}초`}</span>
+      </div>
+      <div class="cache-key">${escapeHtml(e.key)}</div>
+      <div class="cache-track"><div class="cache-fill" style="width:${(left / cacheTtl) * 100}%;background:${color}"></div></div>
+    </div>`;
+  }).join("");
+}
+
+refreshCache();
+setInterval(refreshCache, 2000);
+setInterval(drawCache, 100);
 
 // ---- 3막
 const act3Results = {};
 const POLL_MS = 250;
 
-// 내 상세 조회가 끝났을 때의 설명 문구
-function lightNote(t) {
+// 결과 칩: 내 상세 조회가 끝나면 'DB 처리 / 줄 서서 기다림', 고객 검색까지 다 끝나면 '고객 검색 완료'를 더한다
+function act3Note(t) {
   if (t.light.error) return `<span class="error">상세 조회 실패: ${escapeHtml(t.light.error)}</span>`;
-  const s = t.light_summary;
-  return t.light_waiting_ms > 100
-    ? `내 상세 조회는 DB에서 <b>${fmt(s.engine_ms)}</b> 만에 처리됐지만, 스레드가 비기를 <b>${fmt(t.light_waiting_ms)}</b> 동안 줄 서서 기다렸습니다.`
-    : `남는 스레드가 바로 받아서 처리했습니다. DB 처리 <b>${fmt(s.engine_ms)}</b> + 네트워크 왕복을 합쳐 <b>${fmt(s.total_ms)}</b>.`;
+  const chips = [];
+  if (t.light_summary) {
+    chips.push(`<span class="chip">DB 처리 <b>${fmt(t.light_summary.engine_ms)}</b></span>`);
+    chips.push(`<span class="chip ${t.light_waiting_ms > 100 ? "bad" : "good"}">줄 서서 기다림 <b>${fmt(t.light_waiting_ms)}</b></span>`);
+  }
+  if (t.done && t.heavy.length) {
+    const lastEnd = Math.max(...t.heavy.map((h) => h.end_ms));
+    const errors = t.heavy.filter((h) => h.error).length;
+    chips.push(`<span class="chip">고객 검색 완료 <b>${fmt(lastEnd)}</b></span>`);
+    if (errors) chips.push(`<span class="chip bad">실패 <b>${errors}개</b></span>`);
+  }
+  return chips.length ? `<div class="chips">${chips.join("")}</div>` : "";
 }
 
 // 서버는 요청을 뒤에서 돌리고 바로 run_id를 준다. 모든 요청이 끝날 때까지 진행 상황을 다시 물어봐서
 // 막대가 실시간으로 차오르게 그린다. 다 끝날 때까지 3막 버튼은 잠가 둔다
 // (남은 검색이 CPU를 쓰는 동안 다음 실행을 하면 측정이 흔들리기 때문).
 async function followAct3(mode, runId, t) {
-  let lightNoted = false;
   while (true) {
     act3Results[mode].timeline = t;
     drawTimelines();
-    if (t.light.end_ms != null && !lightNoted) {
-      $("a3-note").innerHTML = lightNote(t);
-      lightNoted = true;
-    }
-    if (t.done) {
-      if (t.heavy.length) {
-        const lastEnd = Math.max(...t.heavy.map((h) => h.end_ms));
-        const errors = t.heavy.filter((h) => h.error).length;
-        $("a3-note").innerHTML += `<br>다른 고객의 검색 ${t.heavy.length}개는 <b>${fmt(lastEnd)}</b>에 모두 끝났습니다.`
-          + (errors ? ` <span class="error">(${errors}개 실패)</span>` : "");
-      }
-      return;
-    }
+    $("a3-note").innerHTML = act3Note(t);
+    if (t.done) return;
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     if (act3Results[mode]?.run_id !== runId) return;   // 그사이 같은 모드를 다시 실행함
     t = await call(`/api/act3/runs/${runId}`);
@@ -313,14 +496,13 @@ async function followAct3(mode, runId, t) {
 async function runAct3(mode) {
   const buttons = [$("a3-single"), $("a3-multi")];
   busy(buttons, true);
-  $("a3-note").textContent = "요청을 보냈습니다. 막대가 실시간으로 차오릅니다…";
+  $("a3-note").innerHTML = "";
   try {
     const heavy = $("a3-heavy").value;
     const r = await call(`/api/act3?mode=${mode}&heavy=${encodeURIComponent(heavy)}`);
     // 서버가 0~12로 잘라 실제로 보낸 값을 화면에 반영한다
     $("a3-heavy").value = r.heavy_count;
     $("a3-heavy-label").textContent = r.heavy_count;
-    $("a3-id-label").textContent = r.light_id;
     act3Results[mode] = r;
     await followAct3(mode, r.run_id, r.timeline);
   } catch (e) { fail($("a3-note"), e); }
@@ -348,14 +530,12 @@ function timelineHtml(mode, r, scale) {
 
   // 끝난 요청: [보낸 시각 ~ 처리 시작] = 기다림, [처리 시작 ~ 응답] = 처리
   // 응답 전에는 줄을 서 있는지 처리 중인지 알 수 없어서(처리 시간은 응답에 담겨 온다) '응답 대기 중'으로 그린다.
-  const lightDone = t.light.end_ms != null;
   function lane(name, sql, entry, kind, isMe) {
     let body;
     if (entry.start_ms == null) {   // 아직 보내기 전 (상세 조회는 0.05초 늦게 보낸다)
       body = "";
     } else if (entry.end_ms == null) {   // 보낸 시각부터 '지금'까지 자라는 막대
-      body = seg("pending", entry.start_ms, t.now_ms ?? scale,
-                 lightDone && !isMe ? "응답 대기 중… (내 페이지가 뜬 뒤에도 계속)" : "응답 대기 중…");
+      body = seg("pending", entry.start_ms, t.now_ms ?? scale, "대기 중…");
     } else if (entry.error) {
       body = seg("wait", entry.start_ms, entry.end_ms, `실패: ${escapeHtml(entry.error)}`);
     } else {
@@ -369,15 +549,11 @@ function timelineHtml(mode, r, scale) {
       <div class="track2">${body}</div></div>`;
   }
 
+  // 라벨은 짧게: 누구인지 + 무엇을 찾는지. 읽은 행 수·결과 건수는 범례에 한 번만 쓴다.
   const customers = "ABCDEFGHIJKL";
-  // 끝난 검색은 '결과 0건 · 1,000,000행 확인'처럼 실제로 몇 행을 읽었는지 붙인다
-  const heavyDetail = (h) => h.rows_scanned != null
-    ? `<br>→ 결과 ${num(h.row_count)}건 · ${num(h.rows_scanned)}행 확인`
-    : h.end_ms == null ? "<br>→ 응답 대기 중…" : "";
   const lanes = t.heavy.map((h, i) =>
-    lane(`고객 ${customers[i]} · 상품 검색`,
-         `name = '${escapeHtml(h.name ?? "…")}'${heavyDetail(h)}`, h, "heavy", false)).join("")
-    + lane("나 · 상품 상세 페이지", `WHERE id = ${r.light_id} (B+ 트리)`, t.light, "light", true);
+    lane(`고객 ${customers[i]}`, escapeHtml(h.name ?? "…"), h, "heavy", false)).join("")
+    + lane("나 · 상세 페이지", `id = ${r.light_id}`, t.light, "light", true);
 
   const step = scale > 3000 ? 1000 : 500;
   let ticks = "";
@@ -388,8 +564,8 @@ function timelineHtml(mode, r, scale) {
     <div class="tl-head">
       <h3>DB 스레드 ${slow ? "1개" : "8개"}</h3>
       ${t.light_summary
-        ? `<div class="tl-result ${slow ? "slow" : "fast"}">내 상세 페이지 표시까지 <b>${fmt(t.light_summary.total_ms)}</b></div>`
-        : `<div class="tl-result">내 상세 페이지 기다리는 중… <b>${fmt(t.now_ms)}</b></div>`}
+        ? `<div class="tl-result ${slow ? "slow" : "fast"}">내 상세 페이지 <b>${fmt(t.light_summary.total_ms)}</b></div>`
+        : `<div class="tl-result">내 상세 페이지 <b>${fmt(t.now_ms)}…</b></div>`}
     </div>
     ${lanes}
     <div class="axis"><div></div><div class="axis-line">${ticks}</div></div>

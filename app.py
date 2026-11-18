@@ -7,6 +7,8 @@
 2막  인기 상품 검색: Cache-Aside. Redis를 먼저 보고, 없으면 DBMS 조회 후 TTL을 걸어 저장
 3막  스레드풀: 무거운 풀스캔 여러 개가 도는 중에 상품 상세(id 조회)가 얼마나 기다리는지 비교
 """
+import hashlib
+import json
 import os
 import threading
 import time
@@ -107,45 +109,60 @@ def demo_page():
 
 # ---------------------------------------------------------------- 1막: 인덱스
 
+# 1막은 버튼마다 한 가지 방법만 실행한다. 둘을 따로 눌러 봐야 체감 속도 차이가 느껴지기 때문.
+#   method=scan  → use_index=false (풀스캔)
+#   method=index → use_index=true  (B+ 트리)
+
+def act1_method():
+    method = request.args.get("method", "index")
+    if method not in ("scan", "index"):
+        raise ValueError("method는 scan 또는 index여야 합니다")
+    return method
+
+
+def rows_digest(rows):
+    """결과 행 전체의 지문. 화면이 두 번의 조회 결과가 같은지 행을 다 받지 않고도 비교할 수 있게 한다."""
+    return hashlib.sha1(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
 @app.get("/api/act1")
 def act1_product_detail():
+    method = act1_method()
     product_id = int(request.args.get("id", "999999"))
     sql = f"SELECT * FROM {TABLE} WHERE id = {product_id};"
 
-    scan_result, scan_lock, scan_ms = run_sql(sql, use_index=False)
-    index_result, index_lock, index_ms = run_sql(sql, use_index=True)
+    result, lock, round_trip_ms = run_sql(sql, use_index=(method == "index"))
 
     return jsonify({
         "sql": sql,
-        "full_scan": summarize(scan_result, scan_ms, scan_lock),
-        "index": summarize(index_result, index_ms, index_lock),
-        "same_result": scan_result["rows"] == index_result["rows"],
+        "method": method,
+        "result": summarize(result, round_trip_ms, lock),
+        "rows_digest": rows_digest(result["rows"]),
     })
 
 
 @app.get("/api/act1/range")
 def act1_product_range():
-    """범위 검색: 같은 `id <= N`을 풀스캔 / B+ 트리(시작 리프를 찾은 뒤 옆 리프를 따라감)로 비교.
+    """범위 검색: `id <= N`을 풀스캔 또는 B+ 트리(시작 리프를 찾은 뒤 옆 리프를 따라감)로 조회.
 
     Mini DBMS는 WHERE 조건을 하나만 받아서 BETWEEN이나 AND 대신 `id <= N`을 쓴다.
     id가 1부터 시작하므로 결과는 최대 N행이고, 그래서 N에 상한을 둔다.
     """
+    method = act1_method()
     upper = int(request.args.get("to", "100"))
     if not 1 <= upper <= RANGE_MAX_ROWS:
         raise ValueError(f"끝 번호는 1 ~ {RANGE_MAX_ROWS:,} 사이로 입력해 주세요")
     sql = f"SELECT * FROM {TABLE} WHERE id <= {upper};"
 
-    scan_result, scan_lock, scan_ms = run_sql(sql, use_index=False)
-    index_result, index_lock, index_ms = run_sql(sql, use_index=True)
+    result, lock, round_trip_ms = run_sql(sql, use_index=(method == "index"))
 
     return jsonify({
         "sql": sql,
-        # 행이 많을 수 있어 전체 행은 보내지 않는다. 결과가 같은지는 여기서 비교한다.
-        "full_scan": summarize(scan_result, scan_ms, scan_lock, include_rows=False),
-        "index": summarize(index_result, index_ms, index_lock, include_rows=False),
-        "same_result": scan_result["rows"] == index_result["rows"],
-        # 화면 표에 보여 줄 앞부분만 (B+ 트리 결과 기준, 두 결과가 같으므로 어느 쪽이든 상관없다)
-        "preview_rows": index_result["rows"][:RANGE_PREVIEW_ROWS],
+        "method": method,
+        # 행이 많을 수 있어 전체 행은 보내지 않는다. 화면 표에는 앞부분만.
+        "result": summarize(result, round_trip_ms, lock, include_rows=False),
+        "preview_rows": result["rows"][:RANGE_PREVIEW_ROWS],
+        "rows_digest": rows_digest(result["rows"]),
     })
 
 
@@ -153,6 +170,61 @@ def act1_product_range():
 
 def search_cache_key(name):
     return f"search:name:{name}"
+
+
+# 캐시가 HIT여도 표를 그릴 수 있게 컬럼 이름도 같이 저장한다: {"columns": [...], "rows": [...]}
+PRODUCT_COLUMNS = ["id", "name", "category", "price"]
+
+
+def unpack_cached(value):
+    """Redis에 저장된 값을 (columns, rows)로. 예전 형식(행 목록만 저장)도 읽는다."""
+    if isinstance(value, dict):
+        return value.get("columns") or PRODUCT_COLUMNS, value.get("rows", [])
+    return PRODUCT_COLUMNS, value
+
+
+def search_rows_payload(columns, rows):
+    """화면 표용. 검색 결과가 많을 수 있어 앞부분만 보낸다."""
+    return {"columns": columns, "rows": rows[:RANGE_PREVIEW_ROWS], "row_count": len(rows)}
+
+
+# 캐시 카운트다운 패널용 기록. Mini Redis에는 남은 TTL을 묻거나 키 목록을 보는 기능이 없어서,
+# 쇼핑몰 서버가 저장할 때 '검색어 → 만료 시각(time.time 기준)'을 적어 둔다.
+# 실제로 아직 있는지는 패널을 그릴 때마다 Redis에 GET으로 확인한다 (GET은 TTL을 늘리지 않는다).
+_cached_searches = {}
+_cached_searches_lock = threading.Lock()
+
+
+def remember_cached(name):
+    with _cached_searches_lock:
+        _cached_searches[name] = time.time() + SEARCH_CACHE_TTL
+
+
+def forget_cached(name):
+    with _cached_searches_lock:
+        _cached_searches.pop(name, None)
+
+
+@app.get("/api/act2/cache")
+def act2_cache_status():
+    """지금 캐시에 있는 검색어와 남은 시간. 화면 오른쪽 카운트다운 패널이 주기적으로 부른다."""
+    now = time.time()
+    with _cached_searches_lock:
+        items = list(_cached_searches.items())
+
+    entries = []
+    for name, expires_at in items:
+        remaining = expires_at - now
+        alive = remaining > 0 and requests.get(
+            f"{MINI_REDIS_URL}/get", params={"key": search_cache_key(name)}, timeout=2
+        ).status_code == 200
+        if not alive:   # 만료됐거나 누가 지웠다 → 기록에서도 뺀다
+            forget_cached(name)
+            continue
+        entries.append({"name": name, "key": search_cache_key(name), "remaining_s": round(remaining, 2)})
+
+    entries.sort(key=lambda e: -e["remaining_s"])   # 가장 최근에 저장한 것이 위로
+    return jsonify({"ttl": SEARCH_CACHE_TTL, "entries": entries})
 
 
 @app.get("/api/act2")
@@ -168,10 +240,11 @@ def act2_popular_search():
     redis_get_ms = now_ms() - redis_started
 
     if cached.status_code == 200:
+        columns, rows = unpack_cached(cached.json()["value"])
         return jsonify({
             "source": "cache",
             "key": key,
-            "rows": cached.json()["value"],
+            **search_rows_payload(columns, rows),
             "redis_ms": round(redis_get_ms, 3),
             "db_ms": None,
             "total_ms": round(now_ms() - started, 3),
@@ -179,26 +252,32 @@ def act2_popular_search():
 
     sql = f"SELECT * FROM {TABLE} WHERE name = {literal};"
     result, lock, db_ms = run_sql(sql)
+    columns = result.get("columns") or PRODUCT_COLUMNS
 
     set_started = now_ms()
-    requests.post(
+    saved = requests.post(
         f"{MINI_REDIS_URL}/set",
-        json={"key": key, "value": result["rows"], "ttl": SEARCH_CACHE_TTL},
+        json={"key": key, "value": {"columns": columns, "rows": result["rows"]}, "ttl": SEARCH_CACHE_TTL},
         timeout=5,
     )
     redis_set_ms = now_ms() - set_started
+    cache_saved = saved.status_code == 200
+    if cache_saved:
+        remember_cached(name)
 
     return jsonify({
         "source": "db",
         "key": key,
         "sql": sql,
-        "rows": result["rows"],
+        **search_rows_payload(columns, result["rows"]),
         "rows_scanned": result.get("rows_scanned"),
         "engine_ms": result.get("elapsed_ms"),
         "redis_ms": round(redis_get_ms + redis_set_ms, 3),
         "db_ms": round(db_ms, 3),
         "total_ms": round(now_ms() - started, 3),
         "ttl": SEARCH_CACHE_TTL,
+        "cache_saved": cache_saved,
+        "cache_error": None if cache_saved else f"Redis 저장 실패 (HTTP {saved.status_code}): {saved.text[:200]}",
     })
 
 
@@ -209,6 +288,7 @@ def act2_reset():
     response = requests.delete(
         f"{MINI_REDIS_URL}/delete", params={"key": search_cache_key(name)}, timeout=5
     )
+    forget_cached(name)
     return jsonify(response.json())
 
 
