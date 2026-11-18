@@ -42,6 +42,18 @@
   .note { margin-top: 14px; font-size: 14px; color: var(--muted); min-height: 1.5em; }
   .note b { color: var(--ink); }
   .error { color: var(--slow); }
+  .sub + .sub { margin-top: 22px; padding-top: 20px; border-top: 1px dashed var(--line); }
+  .sub-head { font-weight: 700; margin-bottom: 10px; }
+  .sub-desc { margin: -4px 0 12px; font-size: 14px; color: var(--muted); }
+
+  /* 1막 결과 표 */
+  .result { margin-top: 12px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .result table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .result th, .result td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .result th { position: sticky; top: 0; background: #f1efe9; font-weight: 600; }
+  .result td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .result tr:last-child td { border-bottom: 0; }
+  .result-more { margin-top: 6px; font-size: 13px; color: var(--muted); }
 
   /* 3막 타임라인 */
   .legend { display: flex; gap: 18px; margin-top: 16px; font-size: 13px; color: var(--muted); }
@@ -81,14 +93,32 @@
   <!-- 1막 -->
   <section>
     <div class="act">1막 · 인덱스</div>
-    <h2>상품 번호로 상세 페이지 조회</h2>
-    <p class="desc">같은 <code>WHERE id = ?</code>를 인덱스 없이(풀스캔) 찾을 때와 B+ 트리로 찾을 때</p>
-    <div class="controls">
-      상품 번호 <input id="a1-id" value="999999">
-      <button id="a1-run">조회</button>
+    <h2>상품 번호로 찾기: 한 개 / 범위</h2>
+    <p class="desc">같은 조건을 인덱스 없이(풀스캔) 찾을 때와 B+ 트리로 찾을 때</p>
+
+    <div class="sub">
+      <div class="sub-head">상세 페이지 · 한 개 <code>WHERE id = ?</code></div>
+      <div class="controls">
+        상품 번호 <input id="a1-id" value="999999">
+        <button id="a1-run">조회</button>
+      </div>
+      <div class="bars" id="a1-bars"></div>
+      <div class="note" id="a1-note"></div>
+      <div id="a1-table"></div>
     </div>
-    <div class="bars" id="a1-bars"></div>
-    <div class="note" id="a1-note"></div>
+
+    <div class="sub">
+      <div class="sub-head">상품 목록 · 범위 <code>WHERE id &lt;= ?</code></div>
+      <p class="sub-desc">B+ 트리는 시작 위치의 리프를 한 번 찾은 뒤, 연결된 옆 리프를 따라가며 범위 안의 행만 읽습니다.
+        (해시 인덱스는 범위 검색을 할 수 없습니다)</p>
+      <div class="controls">
+        상품 번호 1 ~ <input id="a1r-to" value="100" style="width:100px">
+        <button id="a1r-run">범위 조회</button>
+      </div>
+      <div class="bars" id="a1r-bars"></div>
+      <div class="note" id="a1r-note"></div>
+      <div id="a1r-table"></div>
+    </div>
   </section>
 
   <!-- 2막 -->
@@ -110,8 +140,9 @@
     <div class="act">3막 · 스레드풀</div>
     <h2>남의 무거운 검색 때문에 내 상세 페이지가 늦게 뜰까?</h2>
     <p class="desc">
-      다른 고객 <span id="a3-heavy-label">2</span>명이 캐시에 없는 상품을 검색(100만 행 풀스캔)하는 중에,
-      내가 상품 상세 페이지(<code>id = 123</code>, B+ 트리)를 엽니다.<br>
+      다른 고객 <span id="a3-heavy-label">2</span>명이 <b>DB에 없는 상품명</b>을 검색하는 중에
+      (이름에는 인덱스가 없어서, 결과가 0건이어도 100만 행을 끝까지 다 확인합니다)
+      내가 상품 상세 페이지(<code>id = <span id="a3-id-label">123</span></code>, B+ 트리)를 엽니다.<br>
       <b>측정 대상: 내 상품 상세 페이지가 뜨기까지 걸린 시간</b>
     </p>
     <div class="controls">
@@ -165,21 +196,48 @@ async function refreshStatus() {
   } catch (e) { $("status").innerHTML = `<span class="pill off">쇼핑몰 서버 응답 없음</span>`; }
 }
 
-// ---- 1막
-$("a1-run").onclick = async () => {
-  busy([$("a1-run")], true);
-  $("a1-note").textContent = "조회 중...";
+// ---- 1막 결과 표: 실제로 DB에서 가져온 상품 행을 보여 준다
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const COLUMN_LABELS = { id: "상품 번호", name: "이름", category: "카테고리", price: "가격" };
+
+function drawResultTable(container, columns, rows, total) {
+  if (!rows.length) {
+    container.innerHTML = `<div class="result-more">해당하는 상품이 없습니다.</div>`;
+    return;
+  }
+  const cell = (col, v) => col === "price" ? `<td class="num">${num(v)}원</td>`
+                         : col === "id"    ? `<td class="num">${num(v)}</td>`
+                         : `<td>${escapeHtml(v)}</td>`;
+  const head = columns.map((c) => `<th>${COLUMN_LABELS[c] || escapeHtml(c)}</th>`).join("");
+  const body = rows.map((row) => `<tr>${row.map((v, i) => cell(columns[i], v)).join("")}</tr>`).join("");
+  container.innerHTML = `<div class="result"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    + (total > rows.length ? `<div class="result-more">앞 ${num(rows.length)}건만 표시 · 외 ${num(total - rows.length)}건</div>` : "");
+}
+
+// ---- 1막 (한 개 / 범위가 같은 모양으로 그려진다. prefix: a1 또는 a1r)
+async function runAct1(prefix, url, indexLabel) {
+  const button = $(`${prefix}-run`), note = $(`${prefix}-note`);
+  busy([button], true);
+  note.textContent = "조회 중...";
+  $(`${prefix}-table`).innerHTML = "";
   try {
-    const r = await call(`/api/act1?id=${encodeURIComponent($("a1-id").value)}`);
-    drawBars($("a1-bars"), [
+    const r = await call(url);
+    // 한 개 조회는 index.rows에 전체 결과가, 범위 조회는 preview_rows에 앞부분만 온다
+    drawResultTable($(`${prefix}-table`), r.index.columns || [], r.preview_rows || r.index.rows || [], r.index.row_count);
+    drawBars($(`${prefix}-bars`), [
       { label: "인덱스 없음", sub: `풀스캔 · ${num(r.full_scan.rows_scanned)}행 확인`, ms: r.full_scan.engine_ms, color: "var(--slow)" },
-      { label: "B+ 트리 인덱스", sub: `${num(r.index.rows_scanned)}행 확인`, ms: r.index.engine_ms, color: "var(--fast)" },
+      { label: indexLabel, sub: `${num(r.index.rows_scanned)}행 확인`, ms: r.index.engine_ms, color: "var(--fast)" },
     ]);
     const times = r.index.engine_ms ? Math.round(r.full_scan.engine_ms / r.index.engine_ms) : "-";
-    $("a1-note").innerHTML = `결과 ${r.index.row_count}건 · 두 방법 결과 ${r.same_result ? "동일" : "<b>다름!</b>"} · <b>약 ${num(times)}배</b> 차이 (DBMS 엔진 내부 시간 기준)`;
-  } catch (e) { fail($("a1-note"), e); }
-  busy([$("a1-run")], false);
-};
+    note.innerHTML = `결과 ${num(r.index.row_count)}건 · 두 방법 결과 ${r.same_result ? "동일" : "<b>다름!</b>"} · <b>약 ${num(times)}배</b> 차이 (DBMS 엔진 내부 시간 기준)`
+      + `<br>네트워크 왕복을 포함한 체감 시간: 풀스캔 <b>${fmt(r.full_scan.total_ms)}</b> vs B+ 트리 <b>${fmt(r.index.total_ms)}</b>`;
+  } catch (e) { fail(note, e); }
+  busy([button], false);
+}
+$("a1-run").onclick = () =>
+  runAct1("a1", `/api/act1?id=${encodeURIComponent($("a1-id").value)}`, "B+ 트리 인덱스");
+$("a1r-run").onclick = () =>
+  runAct1("a1r", `/api/act1/range?to=${encodeURIComponent($("a1r-to").value)}`, "B+ 트리 · 리프 따라가기");
 
 // ---- 2막
 const act2History = [];
@@ -212,19 +270,46 @@ $("a2-reset").onclick = async () => {
 
 // ---- 3막
 const act3Results = {};
+const POLL_MS = 250;
+
+// 내 페이지가 뜬 뒤에도 뒤에서 도는 무거운 검색을 끝날 때까지 다시 물어봐서 타임라인을 갱신한다.
+// 다 끝날 때까지 3막 버튼은 잠가 둔다. 남은 검색이 CPU를 쓰는 동안 다음 실행을 하면 측정이 흔들리기 때문.
+async function followAct3(mode, runId) {
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    if (act3Results[mode]?.run_id !== runId) return;   // 그사이 같은 모드를 다시 실행함
+    let t;
+    try { t = await call(`/api/act3/runs/${runId}`); }
+    catch (e) { fail($("a3-note"), e); return; }
+    act3Results[mode].timeline = t;
+    drawTimelines();
+    if (t.done) {
+      const lastEnd = Math.max(...t.heavy.map((h) => h.end_ms));
+      const errors = t.heavy.filter((h) => h.error).length;
+      $("a3-note").innerHTML += `<br>다른 고객의 검색 ${t.heavy.length}개는 <b>${fmt(lastEnd)}</b>에 모두 끝났습니다.`
+        + (errors ? ` <span class="error">(${errors}개 실패)</span>` : "");
+      return;
+    }
+  }
+}
+
 async function runAct3(mode) {
   const buttons = [$("a3-single"), $("a3-multi")];
   busy(buttons, true);
   $("a3-note").textContent = "무거운 검색을 보내는 중...";
   try {
     const heavy = $("a3-heavy").value;
-    $("a3-heavy-label").textContent = heavy;
-    const r = await call(`/api/act3?mode=${mode}&heavy=${heavy}`);
+    const r = await call(`/api/act3?mode=${mode}&heavy=${encodeURIComponent(heavy)}`);
+    // 서버가 0~12로 잘라 실제로 보낸 값을 화면에 반영한다
+    $("a3-heavy").value = r.heavy_count;
+    $("a3-heavy-label").textContent = r.heavy_count;
+    $("a3-id-label").textContent = r.light_id;
     act3Results[mode] = r;
     drawTimelines();
     $("a3-note").innerHTML = r.light_waiting_ms > 100
       ? `내 상세 조회는 DB에서 <b>${fmt(r.light.engine_ms)}</b> 만에 처리됐지만, 스레드가 비기를 <b>${fmt(r.light_waiting_ms)}</b> 동안 줄 서서 기다렸습니다.`
       : `남는 스레드가 바로 받아서 처리했습니다. DB 처리 <b>${fmt(r.light.engine_ms)}</b> + 네트워크 왕복을 합쳐 <b>${fmt(r.light.total_ms)}</b>.`;
+    if (!r.timeline.done) await followAct3(mode, r.run_id);
   } catch (e) { fail($("a3-note"), e); }
   busy(buttons, false);
 }
@@ -234,7 +319,8 @@ function drawTimelines() {
   const runs = ["single", "multi"].filter((m) => act3Results[m]);
   const ends = runs.flatMap((m) => {
     const t = act3Results[m].timeline;
-    return [t.light.end_ms, ...t.heavy.map((h) => h.end_ms || 0)];
+    // 진행 중인 검색은 '지금'까지 그리므로, 시간 축도 지금 시각까지 늘어난다
+    return [t.light.end_ms, ...t.heavy.map((h) => h.end_ms ?? t.now_ms ?? 0)];
   });
   const scale = Math.max(2000, ...ends) * 1.05;
   $("a3-timelines").innerHTML = runs.map((m) => timelineHtml(m, act3Results[m], scale)).join("");
@@ -250,8 +336,10 @@ function timelineHtml(mode, r, scale) {
   // 끝난 요청: [보낸 시각 ~ 처리 시작] = 기다림, [처리 시작 ~ 응답] = 처리
   function lane(name, sql, entry, kind, isMe) {
     let body;
-    if (entry.end_ms == null) {   // 내 페이지가 뜬 시점에도 아직 처리 중
-      body = seg(`${kind} ongoing`, entry.start_ms ?? 0, scale, "처리 중… (내 페이지가 뜬 뒤에도 계속)");
+    if (entry.end_ms == null) {   // 아직 처리 중: 보낸 시각부터 '지금'까지 자라는 막대
+      body = seg(`${kind} ongoing`, entry.start_ms ?? 0, t.now_ms ?? scale, "처리 중… (내 페이지가 뜬 뒤에도 계속)");
+    } else if (entry.error) {
+      body = seg("wait", entry.start_ms, entry.end_ms, `실패: ${escapeHtml(entry.error)}`);
     } else {
       const processStart = entry.end_ms - (entry.engine_ms || 0);
       const waited = processStart - entry.start_ms;
@@ -264,9 +352,14 @@ function timelineHtml(mode, r, scale) {
   }
 
   const customers = "ABCDEFGHIJKL";
+  // 끝난 검색은 '결과 0건 · 1,000,000행 확인'처럼 실제로 몇 행을 읽었는지 붙인다
+  const heavyDetail = (h) => h.rows_scanned != null
+    ? `<br>→ 결과 ${num(h.row_count)}건 · ${num(h.rows_scanned)}행 확인`
+    : h.end_ms == null ? "<br>→ 풀스캔 중…" : "";
   const lanes = t.heavy.map((h, i) =>
-    lane(`고객 ${customers[i]} · 상품 검색`, "WHERE name = '…' (풀스캔)", h, "heavy", false)).join("")
-    + lane("나 · 상품 상세 페이지", `WHERE id = 123 (B+ 트리)`, t.light, "light", true);
+    lane(`고객 ${customers[i]} · 상품 검색`,
+         `name = '${escapeHtml(h.name ?? "…")}'${heavyDetail(h)}`, h, "heavy", false)).join("")
+    + lane("나 · 상품 상세 페이지", `WHERE id = ${r.light_id} (B+ 트리)`, t.light, "light", true);
 
   const step = scale > 3000 ? 1000 : 500;
   let ticks = "";
