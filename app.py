@@ -183,7 +183,7 @@ def unique_rare_name():
 def act3_thread_pool():
     mode = request.args.get("mode", "multi")
     base_url = DBMS_URL_SINGLE if mode == "single" else DBMS_URL_MULTI
-    heavy_count = min(int(request.args.get("heavy", "4")), MAX_HEAVY)
+    heavy_count = min(int(request.args.get("heavy", "2")), MAX_HEAVY)
     product_id = int(request.args.get("id", "123"))
 
     heavy_sql = [
@@ -191,13 +191,15 @@ def act3_thread_pool():
     ]
     light_sql = f"SELECT * FROM {TABLE} WHERE id = {product_id};"
 
-    with ThreadPoolExecutor(max_workers=heavy_count + 1) as pool:
-        heavy_futures = [pool.submit(run_sql, sql, True, base_url) for sql in heavy_sql]
+    pool = ThreadPoolExecutor(max_workers=heavy_count + 1)
+    try:
+        for sql in heavy_sql:
+            pool.submit(run_sql, sql, True, base_url)
         time.sleep(HEAVY_HEAD_START)   # 무거운 요청이 먼저 도착하게 한다
-        light_future = pool.submit(run_sql, light_sql, True, base_url)
-
-        light_result, light_lock, light_ms = light_future.result()
-        heavy = [summarize(*_reorder(f.result())) for f in heavy_futures]
+        light_result, light_lock, light_ms = pool.submit(run_sql, light_sql, True, base_url).result()
+    finally:
+        # 상세 조회가 끝나면 바로 응답한다. 무거운 검색은 뒤에서 마저 끝나게 두고 기다리지 않는다.
+        pool.shutdown(wait=False)
 
     light = summarize(light_result, light_ms, light_lock)
     engine_ms = light["engine_ms"] or 0
@@ -209,13 +211,7 @@ def act3_thread_pool():
         "light": light,
         # 처리 자체는 금방 끝났는데 전체 시간이 길다면, 그 차이는 줄 서서 기다린 시간이다
         "light_waiting_ms": round(light["total_ms"] - engine_ms, 3),
-        "heavy": [{k: h[k] for k in ("engine_ms", "total_ms", "rows_scanned")} for h in heavy],
     })
-
-
-def _reorder(run_sql_output):
-    result, lock, round_trip_ms = run_sql_output
-    return result, round_trip_ms, lock
 
 
 @app.get("/api/status")

@@ -48,12 +48,12 @@ python app.py
 | `GET /api/act1?id=999999` | 같은 id를 `use_index=false`, `true`로 한 번씩 조회해서 비교 |
 | `GET /api/act2?name=에어팟 프로` | Cache-Aside. Redis HIT면 바로 응답, MISS면 DBMS 조회 후 TTL 60초로 저장 |
 | `POST /api/act2/reset?name=에어팟 프로` | 해당 검색 캐시 삭제 (리허설 반복용) |
-| `GET /api/act3?mode=single\|multi&heavy=4&id=123` | 캐시에 없는 풀스캔 `heavy`개를 먼저 보내고 0.05초 뒤 id 조회를 보내서, id 조회의 응답 시간과 기다린 시간을 반환 |
+| `GET /api/act3?mode=single\|multi&heavy=2&id=123` | 캐시에 없는 풀스캔 `heavy`개를 먼저 보내고 0.05초 뒤 id 조회를 보내서, id 조회의 응답 시간과 기다린 시간을 반환 |
 | `GET /api/status` | 세 서버가 켜져 있는지 확인 |
 
 ## 발표 전 체크리스트
 
 - [ ] 2막 시연 전에 **캐시 비우기**를 눌러 첫 검색이 MISS가 되게 하기 (TTL이 60초라 리허설 직후면 HIT가 남아 있을 수 있음)
 - [ ] 3막은 **스레드 1개 → 스레드 8개** 순서로 누르기
-- [ ] 3막 무거운 검색은 4~5개면 충분 (1스레드 서버 큐가 넘치지 않게 최대 12개로 제한)
+- [ ] 3막 무거운 검색은 2개(1스레드에서 약 3.6초 대기)면 충분 (1스레드 서버 큐가 넘치지 않게 최대 12개로 제한)
 - [ ] 시연 녹화 영상 백업
