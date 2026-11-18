@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 MINI_REDIS_URL = os.environ.get("MINI_REDIS_URL", "http://127.0.0.1:8000")
 DBMS_URL_MULTI = os.environ.get("DBMS_URL_MULTI", "http://127.0.0.1:9000")    # 스레드 N개
@@ -72,6 +73,8 @@ def summarize(result, round_trip_ms, lock=None):
 
 @app.errorhandler(Exception)
 def handle_error(error):
+    if isinstance(error, HTTPException):   # 404, 405 같은 HTTP 오류는 원래 상태 코드 그대로
+        return jsonify({"error": f"{error.code} {error.name}: {request.path}"}), error.code
     status = 400 if isinstance(error, ValueError) else 502
     if isinstance(error, requests.RequestException):
         return jsonify({"error": f"서버에 연결할 수 없습니다: {error}"}), 502
@@ -191,12 +194,24 @@ def act3_thread_pool():
     ]
     light_sql = f"SELECT * FROM {TABLE} WHERE id = {product_id};"
 
+    # 타임라인용 기록. 각 요청을 보낸 시각과 응답을 받은 시각을 t0 기준 ms로 남긴다.
+    t0 = now_ms()
+    heavy_entries = [{"sql": sql, "start_ms": None, "end_ms": None, "engine_ms": None} for sql in heavy_sql]
+
+    def timed(entry):
+        entry["start_ms"] = round(now_ms() - t0, 3)
+        result, _lock, _ms = run_sql(entry["sql"], True, base_url)
+        entry["engine_ms"] = result.get("elapsed_ms")
+        entry["end_ms"] = round(now_ms() - t0, 3)
+
     pool = ThreadPoolExecutor(max_workers=heavy_count + 1)
     try:
-        for sql in heavy_sql:
-            pool.submit(run_sql, sql, True, base_url)
+        for entry in heavy_entries:
+            pool.submit(timed, entry)
         time.sleep(HEAVY_HEAD_START)   # 무거운 요청이 먼저 도착하게 한다
+        light_start = round(now_ms() - t0, 3)
         light_result, light_lock, light_ms = pool.submit(run_sql, light_sql, True, base_url).result()
+        light_end = round(now_ms() - t0, 3)
     finally:
         # 상세 조회가 끝나면 바로 응답한다. 무거운 검색은 뒤에서 마저 끝나게 두고 기다리지 않는다.
         pool.shutdown(wait=False)
@@ -211,6 +226,11 @@ def act3_thread_pool():
         "light": light,
         # 처리 자체는 금방 끝났는데 전체 시간이 길다면, 그 차이는 줄 서서 기다린 시간이다
         "light_waiting_ms": round(light["total_ms"] - engine_ms, 3),
+        "timeline": {
+            "now_ms": light_end,   # 응답을 돌려준 시점. 이때까지 안 끝난 검색은 end_ms가 null (진행 중)
+            "heavy": [dict(e) for e in heavy_entries],
+            "light": {"sql": light_sql, "start_ms": light_start, "end_ms": light_end, "engine_ms": engine_ms},
+        },
     })
 
 
