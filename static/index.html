@@ -75,7 +75,8 @@
   .track2 { position: relative; height: 26px; background: #f7f6f2; border-radius: 5px; }
   .seg { position: absolute; top: 0; height: 100%; border-radius: 4px; }
   .seg.light { min-width: 4px; }
-  .seg.ongoing { -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
+  .sw.pending, .seg.pending { background: repeating-linear-gradient(45deg, #b4b1a9 0 5px, #cdcac2 5px 10px); }
+  .seg.pending { -webkit-mask-image: linear-gradient(90deg, #000 80%, transparent); mask-image: linear-gradient(90deg, #000 80%, transparent); }
   .seg-label { position: absolute; top: 50%; transform: translateY(-50%); font-size: 12px; white-space: nowrap; color: var(--ink); padding-left: 6px; }
   .axis { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
   .axis-line { position: relative; height: 18px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
@@ -93,7 +94,7 @@
   <!-- 1막 -->
   <section>
     <div class="act">1막 · 인덱스</div>
-    <h2>상품 번호로 찾기: 한 개 / 범위</h2>
+    <h2>상품 번호로 찾기</h2>
     <p class="desc">같은 조건을 인덱스 없이(풀스캔) 찾을 때와 B+ 트리로 찾을 때</p>
 
     <div class="sub">
@@ -112,7 +113,7 @@
       <p class="sub-desc">B+ 트리는 시작 위치의 리프를 한 번 찾은 뒤, 연결된 옆 리프를 따라가며 범위 안의 행만 읽습니다.
         (해시 인덱스는 범위 검색을 할 수 없습니다)</p>
       <div class="controls">
-        상품 번호 1 ~ <input id="a1r-to" value="100" style="width:100px">
+        상품 번호 1 ~ <input id="a1r-to" value="10" style="width:100px">
         <button id="a1r-run">범위 조회</button>
       </div>
       <div class="bars" id="a1r-bars"></div>
@@ -138,7 +139,7 @@
   <!-- 3막 -->
   <section>
     <div class="act">3막 · 스레드풀</div>
-    <h2>남의 무거운 검색 때문에 내 상세 페이지가 늦게 뜰까?</h2>
+    <h2>남의 무거운 검색 때문에 내 상세 페이지가 늦게 뜨는 경우</h2>
     <p class="desc">
       다른 고객 <span id="a3-heavy-label">2</span>명이 <b>DB에 없는 상품명</b>을 검색하는 중에
       (이름에는 인덱스가 없어서, 결과가 0건이어도 100만 행을 끝까지 다 확인합니다)
@@ -151,6 +152,7 @@
       <button id="a3-multi">DB 스레드 8개</button>
     </div>
     <div class="legend">
+      <span><i class="sw pending"></i>응답 대기 중 (실시간)</span>
       <span><i class="sw wait"></i>줄 서서 기다림</span>
       <span><i class="sw heavy"></i>풀스캔 처리 중</span>
       <span><i class="sw light"></i>상세 조회 처리</span>
@@ -272,31 +274,46 @@ $("a2-reset").onclick = async () => {
 const act3Results = {};
 const POLL_MS = 250;
 
-// 내 페이지가 뜬 뒤에도 뒤에서 도는 무거운 검색을 끝날 때까지 다시 물어봐서 타임라인을 갱신한다.
-// 다 끝날 때까지 3막 버튼은 잠가 둔다. 남은 검색이 CPU를 쓰는 동안 다음 실행을 하면 측정이 흔들리기 때문.
-async function followAct3(mode, runId) {
+// 내 상세 조회가 끝났을 때의 설명 문구
+function lightNote(t) {
+  if (t.light.error) return `<span class="error">상세 조회 실패: ${escapeHtml(t.light.error)}</span>`;
+  const s = t.light_summary;
+  return t.light_waiting_ms > 100
+    ? `내 상세 조회는 DB에서 <b>${fmt(s.engine_ms)}</b> 만에 처리됐지만, 스레드가 비기를 <b>${fmt(t.light_waiting_ms)}</b> 동안 줄 서서 기다렸습니다.`
+    : `남는 스레드가 바로 받아서 처리했습니다. DB 처리 <b>${fmt(s.engine_ms)}</b> + 네트워크 왕복을 합쳐 <b>${fmt(s.total_ms)}</b>.`;
+}
+
+// 서버는 요청을 뒤에서 돌리고 바로 run_id를 준다. 모든 요청이 끝날 때까지 진행 상황을 다시 물어봐서
+// 막대가 실시간으로 차오르게 그린다. 다 끝날 때까지 3막 버튼은 잠가 둔다
+// (남은 검색이 CPU를 쓰는 동안 다음 실행을 하면 측정이 흔들리기 때문).
+async function followAct3(mode, runId, t) {
+  let lightNoted = false;
   while (true) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-    if (act3Results[mode]?.run_id !== runId) return;   // 그사이 같은 모드를 다시 실행함
-    let t;
-    try { t = await call(`/api/act3/runs/${runId}`); }
-    catch (e) { fail($("a3-note"), e); return; }
     act3Results[mode].timeline = t;
     drawTimelines();
+    if (t.light.end_ms != null && !lightNoted) {
+      $("a3-note").innerHTML = lightNote(t);
+      lightNoted = true;
+    }
     if (t.done) {
-      const lastEnd = Math.max(...t.heavy.map((h) => h.end_ms));
-      const errors = t.heavy.filter((h) => h.error).length;
-      $("a3-note").innerHTML += `<br>다른 고객의 검색 ${t.heavy.length}개는 <b>${fmt(lastEnd)}</b>에 모두 끝났습니다.`
-        + (errors ? ` <span class="error">(${errors}개 실패)</span>` : "");
+      if (t.heavy.length) {
+        const lastEnd = Math.max(...t.heavy.map((h) => h.end_ms));
+        const errors = t.heavy.filter((h) => h.error).length;
+        $("a3-note").innerHTML += `<br>다른 고객의 검색 ${t.heavy.length}개는 <b>${fmt(lastEnd)}</b>에 모두 끝났습니다.`
+          + (errors ? ` <span class="error">(${errors}개 실패)</span>` : "");
+      }
       return;
     }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    if (act3Results[mode]?.run_id !== runId) return;   // 그사이 같은 모드를 다시 실행함
+    t = await call(`/api/act3/runs/${runId}`);
   }
 }
 
 async function runAct3(mode) {
   const buttons = [$("a3-single"), $("a3-multi")];
   busy(buttons, true);
-  $("a3-note").textContent = "무거운 검색을 보내는 중...";
+  $("a3-note").textContent = "요청을 보냈습니다. 막대가 실시간으로 차오릅니다…";
   try {
     const heavy = $("a3-heavy").value;
     const r = await call(`/api/act3?mode=${mode}&heavy=${encodeURIComponent(heavy)}`);
@@ -305,11 +322,7 @@ async function runAct3(mode) {
     $("a3-heavy-label").textContent = r.heavy_count;
     $("a3-id-label").textContent = r.light_id;
     act3Results[mode] = r;
-    drawTimelines();
-    $("a3-note").innerHTML = r.light_waiting_ms > 100
-      ? `내 상세 조회는 DB에서 <b>${fmt(r.light.engine_ms)}</b> 만에 처리됐지만, 스레드가 비기를 <b>${fmt(r.light_waiting_ms)}</b> 동안 줄 서서 기다렸습니다.`
-      : `남는 스레드가 바로 받아서 처리했습니다. DB 처리 <b>${fmt(r.light.engine_ms)}</b> + 네트워크 왕복을 합쳐 <b>${fmt(r.light.total_ms)}</b>.`;
-    if (!r.timeline.done) await followAct3(mode, r.run_id);
+    await followAct3(mode, r.run_id, r.timeline);
   } catch (e) { fail($("a3-note"), e); }
   busy(buttons, false);
 }
@@ -319,8 +332,8 @@ function drawTimelines() {
   const runs = ["single", "multi"].filter((m) => act3Results[m]);
   const ends = runs.flatMap((m) => {
     const t = act3Results[m].timeline;
-    // 진행 중인 검색은 '지금'까지 그리므로, 시간 축도 지금 시각까지 늘어난다
-    return [t.light.end_ms, ...t.heavy.map((h) => h.end_ms ?? t.now_ms ?? 0)];
+    // 진행 중인 요청은 '지금'까지 그리므로, 시간 축도 지금 시각까지 늘어난다
+    return [t.light, ...t.heavy].map((e) => e.end_ms ?? t.now_ms ?? 0);
   });
   const scale = Math.max(2000, ...ends) * 1.05;
   $("a3-timelines").innerHTML = runs.map((m) => timelineHtml(m, act3Results[m], scale)).join("");
@@ -334,10 +347,15 @@ function timelineHtml(mode, r, scale) {
     (label ? `<div class="seg-label" style="left:${pct(from)}%">${label}</div>` : "");
 
   // 끝난 요청: [보낸 시각 ~ 처리 시작] = 기다림, [처리 시작 ~ 응답] = 처리
+  // 응답 전에는 줄을 서 있는지 처리 중인지 알 수 없어서(처리 시간은 응답에 담겨 온다) '응답 대기 중'으로 그린다.
+  const lightDone = t.light.end_ms != null;
   function lane(name, sql, entry, kind, isMe) {
     let body;
-    if (entry.end_ms == null) {   // 아직 처리 중: 보낸 시각부터 '지금'까지 자라는 막대
-      body = seg(`${kind} ongoing`, entry.start_ms ?? 0, t.now_ms ?? scale, "처리 중… (내 페이지가 뜬 뒤에도 계속)");
+    if (entry.start_ms == null) {   // 아직 보내기 전 (상세 조회는 0.05초 늦게 보낸다)
+      body = "";
+    } else if (entry.end_ms == null) {   // 보낸 시각부터 '지금'까지 자라는 막대
+      body = seg("pending", entry.start_ms, t.now_ms ?? scale,
+                 lightDone && !isMe ? "응답 대기 중… (내 페이지가 뜬 뒤에도 계속)" : "응답 대기 중…");
     } else if (entry.error) {
       body = seg("wait", entry.start_ms, entry.end_ms, `실패: ${escapeHtml(entry.error)}`);
     } else {
@@ -355,7 +373,7 @@ function timelineHtml(mode, r, scale) {
   // 끝난 검색은 '결과 0건 · 1,000,000행 확인'처럼 실제로 몇 행을 읽었는지 붙인다
   const heavyDetail = (h) => h.rows_scanned != null
     ? `<br>→ 결과 ${num(h.row_count)}건 · ${num(h.rows_scanned)}행 확인`
-    : h.end_ms == null ? "<br>→ 풀스캔 중…" : "";
+    : h.end_ms == null ? "<br>→ 응답 대기 중…" : "";
   const lanes = t.heavy.map((h, i) =>
     lane(`고객 ${customers[i]} · 상품 검색`,
          `name = '${escapeHtml(h.name ?? "…")}'${heavyDetail(h)}`, h, "heavy", false)).join("")
@@ -369,7 +387,9 @@ function timelineHtml(mode, r, scale) {
   return `<div class="tl">
     <div class="tl-head">
       <h3>DB 스레드 ${slow ? "1개" : "8개"}</h3>
-      <div class="tl-result ${slow ? "slow" : "fast"}">내 상세 페이지 표시까지 <b>${fmt(r.light.total_ms)}</b></div>
+      ${t.light_summary
+        ? `<div class="tl-result ${slow ? "slow" : "fast"}">내 상세 페이지 표시까지 <b>${fmt(t.light_summary.total_ms)}</b></div>`
+        : `<div class="tl-result">내 상세 페이지 기다리는 중… <b>${fmt(t.now_ms)}</b></div>`}
     </div>
     ${lanes}
     <div class="axis"><div></div><div class="axis-line">${ticks}</div></div>

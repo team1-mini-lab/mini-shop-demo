@@ -231,8 +231,9 @@ def unique_rare_name():
         return f"없는상품_{_heavy_counter}"
 
 
-# 3막 실행 기록. 응답을 보낸 뒤에도 뒤에서 도는 무거운 검색의 진행 상황을 화면이 다시 물어볼 수 있게 남겨 둔다.
-# run_id -> {"t0": 기준 시각, "heavy": [기록...], "light": 기록}. 오래된 것부터 지워 RUN_HISTORY개만 둔다.
+# 3막 실행 기록. 요청은 뒤에서 돌고, 화면은 run_id로 진행 상황을 계속 물어봐서 막대를 실시간으로 그린다.
+# run_id -> {"t0": 기준 시각, "heavy": [기록...], "light": 기록, "light_summary": ..., "light_waiting_ms": ...}
+# 오래된 것부터 지워 RUN_HISTORY개만 둔다.
 RUN_HISTORY = 20
 _runs = OrderedDict()
 _runs_lock = threading.Lock()
@@ -248,19 +249,25 @@ def remember_run(run):
 
 
 def timeline_snapshot(run):
-    """지금 시점의 타임라인. 아직 안 끝난 검색은 end_ms가 null이고, now_ms까지 진행 중으로 그린다."""
-    heavy = [dict(e) for e in run["heavy"]]   # 뒤에서 도는 스레드가 고치는 중일 수 있어 복사해서 보낸다
+    """지금 시점의 타임라인. 아직 안 끝난 요청은 end_ms가 null이고, 화면은 now_ms까지 진행 중으로 그린다."""
+    # 뒤에서 도는 스레드가 고치는 중일 수 있어 복사해서 보낸다
+    heavy = [dict(e) for e in run["heavy"]]
+    light = dict(run["light"])
     return {
         "now_ms": round(now_ms() - run["t0"], 3),
         "heavy": heavy,
-        "light": run["light"],
-        "done": all(h["end_ms"] is not None for h in heavy),
+        "light": light,
+        # 내 상세 조회 결과. 끝나기 전에는 null
+        "light_summary": run["light_summary"],
+        # 처리 자체는 금방 끝났는데 전체 시간이 길다면, 그 차이는 줄 서서 기다린 시간이다
+        "light_waiting_ms": run["light_waiting_ms"],
+        "done": light["end_ms"] is not None and all(h["end_ms"] is not None for h in heavy),
     }
 
 
 @app.get("/api/act3/runs/<run_id>")
 def act3_run_status(run_id):
-    """3막 실행 하나의 현재 타임라인. 화면이 무거운 검색이 다 끝날 때까지 주기적으로 부른다."""
+    """3막 실행 하나의 현재 타임라인. 화면이 모든 요청이 끝날 때까지 주기적으로 부른다."""
     with _runs_lock:
         run = _runs.get(run_id)
     if run is None:
@@ -270,6 +277,11 @@ def act3_run_status(run_id):
 
 @app.get("/api/act3")
 def act3_thread_pool():
+    """무거운 검색 heavy개를 보내고 0.05초 뒤 상세 조회를 보낸다.
+
+    전부 뒤에서 돌리고 run_id를 바로 돌려준다. 화면은 /api/act3/runs/<run_id>로 진행 상황을 받아
+    1스레드든 8스레드든 막대가 차오르는 모습을 실시간으로 그린다.
+    """
     mode = request.args.get("mode", "multi")
     base_url = DBMS_URL_SINGLE if mode == "single" else DBMS_URL_MULTI
     heavy_count = max(0, min(int(request.args.get("heavy", "2")), MAX_HEAVY))
@@ -302,28 +314,38 @@ def act3_thread_pool():
             entry["error"] = str(error)
         entry["end_ms"] = round(now_ms() - t0, 3)
 
-    pool = ThreadPoolExecutor(max_workers=heavy_count + 1)
-    try:
-        for entry in heavy_entries:
-            pool.submit(timed, entry)
-        time.sleep(HEAVY_HEAD_START)   # 무거운 요청이 먼저 도착하게 한다
-        light_start = round(now_ms() - t0, 3)
-        light_result, light_lock, light_ms = pool.submit(run_sql, light_sql, True, base_url).result()
-        light_end = round(now_ms() - t0, 3)
-    finally:
-        # 상세 조회가 끝나면 바로 응답한다. 무거운 검색은 뒤에서 마저 끝나게 두고 기다리지 않는다.
-        pool.shutdown(wait=False)
-
-    light = summarize(light_result, light_ms, light_lock)
-    engine_ms = light["engine_ms"] or 0
+    light_entry = {"sql": light_sql, "start_ms": None, "end_ms": None, "engine_ms": None, "error": None}
     run = {
         "t0": t0,
-        "heavy": heavy_entries,   # 뒤에서 도는 스레드가 계속 채워 넣는 바로 그 리스트
-        "light": {"sql": light_sql, "start_ms": light_start, "end_ms": light_end, "engine_ms": engine_ms},
+        "heavy": heavy_entries,   # 뒤에서 도는 스레드가 계속 채워 넣는 바로 그 기록들
+        "light": light_entry,
+        "light_summary": None,
+        "light_waiting_ms": None,
     }
+
+    def drive():
+        pool = ThreadPoolExecutor(max_workers=max(1, heavy_count))
+        try:
+            for entry in heavy_entries:
+                pool.submit(timed, entry)
+            time.sleep(HEAVY_HEAD_START)   # 무거운 요청이 먼저 도착하게 한다
+            light_entry["start_ms"] = round(now_ms() - t0, 3)
+            try:
+                result, lock, round_trip_ms = run_sql(light_sql, True, base_url)
+                summary = summarize(result, round_trip_ms, lock)
+                engine_ms = summary["engine_ms"] or 0
+                light_entry["engine_ms"] = engine_ms
+                # end_ms보다 먼저 채운다. 화면은 end_ms가 보이면 결과도 있다고 믿는다.
+                run["light_summary"] = summary
+                run["light_waiting_ms"] = round(summary["total_ms"] - engine_ms, 3)
+            except Exception as error:
+                light_entry["error"] = str(error)
+            light_entry["end_ms"] = round(now_ms() - t0, 3)
+        finally:
+            pool.shutdown(wait=False)   # 남은 무거운 검색은 뒤에서 마저 끝난다
+
     run_id = remember_run(run)
-    timeline = timeline_snapshot(run)
-    timeline["now_ms"] = light_end   # 응답을 돌려준 시점. 이때까지 안 끝난 검색은 end_ms가 null (진행 중)
+    threading.Thread(target=drive, daemon=True).start()
     return jsonify({
         "run_id": run_id,
         "mode": mode,
@@ -331,11 +353,8 @@ def act3_thread_pool():
         "heavy_count": heavy_count,
         "light_id": product_id,
         "light_sql": light_sql,
-        "light": light,
-        # 처리 자체는 금방 끝났는데 전체 시간이 길다면, 그 차이는 줄 서서 기다린 시간이다
-        "light_waiting_ms": round(light["total_ms"] - engine_ms, 3),
-        # done이 false면 화면이 /api/act3/runs/<run_id>로 나머지 진행 상황을 이어서 받는다
-        "timeline": timeline,
+        # 방금 시작했으므로 대부분 진행 중. 화면이 /api/act3/runs/<run_id>로 이어서 받는다
+        "timeline": timeline_snapshot(run),
     })
 
 
